@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>🌍 Интерактивный глобус — Флаги всех стран</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://unpkg.com/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;800;900&display=swap" rel="stylesheet">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  :root{
+    --bg-color:#1a2332;
+    --text-color:#f0f4f8;
+    --card-bg:rgba(30,41,55,0.95);
+    --sea-color:#1e3a5f;
+    --land-color:#4d7c8a;
+    --hover-color:#f4c542;
+    --border-color:#0a0f14;
+    --shadow-soft:0 8px 30px rgba(0,0,0,0.5);
+  }
+  body{
+    font-family:'Manrope','Apple Color Emoji','Segoe UI Emoji','Noto Color Emoji',
+    -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+    background:var(--bg-color);color:var(--text-color);
+    display:flex;flex-direction:column;align-items:center;
+    padding:20px 15px;overflow-x:hidden;min-height:100vh;
+  }
+  .controls{display:flex;gap:15px;margin-bottom:25px;z-index:10;flex-wrap:wrap;justify-content:center}
+  .search-box{
+    padding:12px 24px;width:300px;border-radius:40px;border:2px solid var(--border-color);
+    background:var(--card-bg);color:var(--text-color);
+    box-shadow:var(--shadow-soft);font-size:16px;font-weight:500;outline:none;
+    font-family:'Manrope','Apple Color Emoji','Segoe UI Emoji',sans-serif;
+    transition:border .2s,box-shadow .2s;
+  }
+  .search-box:focus{border-color:var(--hover-color);box-shadow:0 0 0 3px rgba(244,197,66,0.25)}
+  .search-box::placeholder{color:var(--text-color);opacity:0.5}
+  .main-row{
+    display:flex;gap:30px;width:100%;max-width:1250px;
+    justify-content:center;align-items:flex-start;flex-wrap:wrap;
+  }
+  .info-card{
+    width:320px;background:var(--card-bg);border-radius:32px;
+    padding:30px 24px;text-align:center;
+    box-shadow:var(--shadow-soft);border:2px solid var(--border-color);
+    backdrop-filter:blur(12px);min-height:240px;
+    display:flex;flex-direction:column;justify-content:center;
+  }
+  .flag-display{
+    font-size:85px;line-height:1.1;margin-bottom:12px;
+    transition:transform .3s;filter:drop-shadow(0 10px 14px rgba(0,0,0,0.25));
+    min-height:90px;display:flex;align-items:center;justify-content:center;
+  }
+  .flag-display img{
+    height:80px;width:auto;
+    filter:drop-shadow(0 6px 12px rgba(0,0,0,0.3));
+  }
+  .flag-display.bounce{animation:flagBounce .6s cubic-bezier(.175,.885,.32,1.275)}
+  @keyframes flagBounce{
+    0%{transform:scale(.15) rotate(-15deg);opacity:0}
+    65%{transform:scale(1.2) rotate(3deg);opacity:1}
+    100%{transform:scale(1) rotate(0deg);opacity:1}
+  }
+  .info-card h2{margin:6px 0;font-size:24px;font-weight:800;letter-spacing:-.2px}
+  .info-card .fact{font-size:15px;opacity:.85;line-height:1.6;font-weight:500;margin-top:10px}
+  .info-card .meta{font-size:12px;opacity:.5;margin-top:16px;font-style:italic}
+  .globe-container{position:relative;width:620px;height:620px;cursor:grab;border-radius:50%}
+  .globe-container canvas{
+    width:100%;height:100%;display:block;
+    filter:drop-shadow(0 15px 35px rgba(0,0,0,0.45));
+  }
+  .tooltip{
+    position:fixed;pointer-events:none;
+    background:rgba(22,26,34,0.96);color:#fff;
+    padding:9px 18px;border-radius:20px;font-size:15px;font-weight:700;
+    z-index:1000;backdrop-filter:blur(6px);white-space:nowrap;
+    box-shadow:0 8px 22px rgba(0,0,0,0.5);border:2px solid #2a3140;
+    letter-spacing:.3px;display:flex;align-items:center;gap:8px;
+  }
+  .tooltip img{height:22px;width:auto;vertical-align:middle;}
+  @media(max-width:950px){
+    .main-row{flex-direction:column-reverse;align-items:center}
+    .globe-container{width:380px;height:380px}
+    .info-card{width:92%;max-width:380px}
+  }
+</style>
+</head>
+<body>
+<h1 style="margin-bottom:10px;font-weight:900;font-size:34px;letter-spacing:1px;text-shadow:0 4px 8px rgba(0,0,0,0.3)">🌍 3D ГЛОБУС</h1>
+<div class="controls">
+  <input type="text" id="searchInput" class="search-box" placeholder="🔍  Найти страну...">
+</div>
+<div class="main-row">
+  <div class="info-card" id="infoCard">
+    <div class="flag-display" id="flagEmoji">🌍</div>
+    <h2 id="countryName">Выберите страну</h2>
+    <p class="fact" id="factText">Нажмите на любую страну на глобусе — увидите флаг и интересный факт. Крутите колёсико для зума!</p>
+    <p class="meta" id="metaText"></p>
+  </div>
+  <div class="globe-container">
+    <canvas id="globeCanvas"></canvas>
+    <div id="tooltipDiv" class="tooltip" style="display:none"></div>
+  </div>
+</div>
+
+<script>(function(){
+
+function flagUrl(emoji){
+  const codePoints=[];
+  for(const s of [...emoji]){
+    codePoints.push(s.codePointAt(0).toString(16));
+  }
+  return`https://cdn.jsdelivr.net/gh/twitter/twemoji@latest/assets/svg/${codePoints.join('-')}.svg`;
+}
+function flagImg(emoji,size){
+  size=size||80;
+  return`<img src="${flagUrl(emoji)}" alt="flag" style="height:${size}px;width:auto" onerror="this.style.display='none'">`;
+}
+
+const factsDB={
+  "Afghanistan":{flag:"🇦🇫",name:"Афганистан",fact:"Перекрёсток Центральной и Южной Азии, через него проходил Великий шёлковый путь."},
+  "Albania":{flag:"🇦🇱",name:"Албания",fact:"На флаге — двуглавый орёл, символ свободы и героизма."},
+  "Algeria":{flag:"🇩🇿",name:"Алжир",fact:"Крупнейшая страна Африки по площади."},
+  "Angola":{flag:"🇦🇴",name:"Ангола",fact:"Один из ведущих производителей нефти в Африке."},
+  "Argentina":{flag:"🇦🇷",name:"Аргентина",fact:"Родина танго и одна из самых футбольных стран мира."},
+  "Armenia":{flag:"🇦🇲",name:"Армения",fact:"Первое государство, принявшее христианство (301 г.)."},
+  "Australia":{flag:"🇦🇺",name:"Австралия",fact:"Кенгуру здесь больше, чем людей — около 50 миллионов!"},
+  "Austria":{flag:"🇦🇹",name:"Австрия",fact:"Вена — столица классической музыки, родина Моцарта."},
+  "Azerbaijan":{flag:"🇦🇿",name:"Азербайджан",fact:"«Страна огней» из-за природных газовых факелов."},
+  "Bahamas":{flag:"🇧🇸",name:"Багамы",fact:"Более 700 островов и рифов."},
+  "Bangladesh":{flag:"🇧🇩",name:"Бангладеш",fact:"Одна из самых густонаселённых стран."},
+  "Belarus":{flag:"🇧🇾",name:"Беларусь",fact:"Беловежская пуща — один из последних первобытных лесов Европы."},
+  "Belgium":{flag:"🇧🇪",name:"Бельгия",fact:"Производит более 220 000 тонн шоколада в год."},
+  "Belize":{flag:"🇧🇿",name:"Белиз",fact:"Большая голубая дыра — гигантская подводная воронка."},
+  "Benin":{flag:"🇧🇯",name:"Бенин",fact:"Родина религии вуду."},
+  "Bhutan":{flag:"🇧🇹",name:"Бутан",fact:"Измеряет национальное счастье вместо ВВП."},
+  "Bolivia":{flag:"🇧🇴",name:"Боливия",fact:"Озеро Титикака — самое высокогорное судоходное озеро."},
+  "Bosnia and Herzegovina":{flag:"🇧🇦",name:"Босния и Герцеговина",fact:"Сараево — город, где началась Первая мировая война."},
+  "Botswana":{flag:"🇧🇼",name:"Ботсвана",fact:"Дельта Окаванго — крупнейшая внутренняя дельта мира."},
+  "Brazil":{flag:"🇧🇷",name:"Бразилия",fact:"5-кратный чемпион мира по футболу, большая часть Амазонки."},
+  "Brunei":{flag:"🇧🇳",name:"Бруней",fact:"Одно из богатейших государств благодаря нефти и газу."},
+  "Bulgaria":{flag:"🇧🇬",name:"Болгария",fact:"Одна из старейших стран Европы, основана в 681 году."},
+  "Burkina Faso":{flag:"🇧🇫",name:"Буркина-Фасо",fact:"Название переводится как «Страна честных людей»."},
+  "Burundi":{flag:"🇧🇮",name:"Бурунди",fact:"Одна из самых маленьких стран Африки."},
+  "Cambodia":{flag:"🇰🇭",name:"Камбоджа",fact:"Ангкор-Ват — крупнейший религиозный памятник в мире."},
+  "Cameroon":{flag:"🇨🇲",name:"Камерун",fact:"Называют «Африкой в миниатюре» из-за разнообразия ландшафтов."},
+  "Canada":{flag:"🇨🇦",name:"Канада",fact:"Больше озёр, чем во всех остальных странах мира вместе."},
+  "Central African Republic":{flag:"🇨🇫",name:"Центральноафриканская Республика",fact:"Одна из наименее населённых стран мира."},
+  "Chad":{flag:"🇹🇩",name:"Чад",fact:"Озеро Чад когда-то было одним из крупнейших в мире."},
+  "Chile":{flag:"🇨🇱",name:"Чили",fact:"Самая длинная и узкая страна (4300 км)."},
+  "China":{flag:"🇨🇳",name:"Китай",fact:"Великая Китайская стена — более 21 000 км."},
+  "Colombia":{flag:"🇨🇴",name:"Колумбия",fact:"Вторая по биоразнообразию страна в мире."},
+  "Congo":{flag:"🇨🇬",name:"Конго",fact:"Тропические леса бассейна реки Конго."},
+  "Dem. Rep. Congo":{flag:"🇨🇩",name:"ДР Конго",fact:"Река Конго — самая глубокая в мире (до 220 м)."},
+  "Costa Rica":{flag:"🇨🇷",name:"Коста-Рика",fact:"Нет армии с 1948 года, славится экотуризмом."},
+  "Croatia":{flag:"🇭🇷",name:"Хорватия",fact:"Галстук (краватка) изобретён в Хорватии."},
+  "Cuba":{flag:"🇨🇺",name:"Куба",fact:"Крупнейший остров Карибского моря."},
+  "Cyprus":{flag:"🇨🇾",name:"Кипр",fact:"По легенде — место рождения Афродиты."},
+  "Czechia":{flag:"🇨🇿",name:"Чехия",fact:"Больше всего пива на душу населения в мире."},
+  "Denmark":{flag:"🇩🇰",name:"Дания",fact:"Старейшая монархия Европы, родина LEGO."},
+  "Djibouti":{flag:"🇩🇯",name:"Джибути",fact:"Озеро Ассаль — самая низкая точка Африки."},
+  "Dominican Rep.":{flag:"🇩🇴",name:"Доминикана",fact:"Делит остров Гаити с Республикой Гаити."},
+  "Ecuador":{flag:"🇪🇨",name:"Эквадор",fact:"Назван в честь экватора, проходящего через страну."},
+  "Egypt":{flag:"🇪🇬",name:"Египет",fact:"Пирамида Хеопса — единственное из Семи чудес света."},
+  "El Salvador":{flag:"🇸🇻",name:"Сальвадор",fact:"Первая страна, принявшая биткоин официальной валютой."},
+  "Eq. Guinea":{flag:"🇬🇶",name:"Экваториальная Гвинея",fact:"Единственная страна Африки с испанским языком."},
+  "Eritrea":{flag:"🇪🇷",name:"Эритрея",fact:"Асмэра славится архитектурой в стиле ар-деко."},
+  "Estonia":{flag:"🇪🇪",name:"Эстония",fact:"Одна из самых цифровых стран, здесь изобрели Skype."},
+  "eSwatini":{flag:"🇸🇿",name:"Эсватини",fact:"Последняя абсолютная монархия в Африке."},
+  "Ethiopia":{flag:"🇪🇹",name:"Эфиопия",fact:"Родина кофе и одна из древнейших цивилизаций."},
+  "Fiji":{flag:"🇫🇯",name:"Фиджи",fact:"Более 330 островов в Тихом океане."},
+  "Finland":{flag:"🇫🇮",name:"Финляндия",fact:"Самая счастливая страна мира, родина Санта-Клауса."},
+  "France":{flag:"🇫🇷",name:"Франция",fact:"Самая посещаемая страна (около 90 млн туристов в год)."},
+  "Gabon":{flag:"🇬🇦",name:"Габон",fact:"80% территории покрыто тропическими лесами."},
+  "Gambia":{flag:"🇬🇲",name:"Гамбия",fact:"Самая маленькая страна материковой Африки."},
+  "Georgia":{flag:"🇬🇪",name:"Грузия",fact:"Одна из древнейших винодельческих стран (8000 лет)."},
+  "Germany":{flag:"🇩🇪",name:"Германия",fact:"Крупнейшая экономика Европы, родина Баха и Бетховена."},
+  "Ghana":{flag:"🇬🇭",name:"Гана",fact:"Первая независимая страна Африки южнее Сахары."},
+  "Greece":{flag:"🇬🇷",name:"Греция",fact:"Колыбель западной цивилизации, демократии и Олимпийских игр."},
+  "Greenland":{flag:"🇬🇱",name:"Гренландия",fact:"Крупнейший остров мира, покрытый ледяным щитом."},
+  "Guatemala":{flag:"🇬🇹",name:"Гватемала",fact:"Сердце древней цивилизации майя."},
+  "Guinea":{flag:"🇬🇳",name:"Гвинея",fact:"Крупнейшие в мире запасы бокситов."},
+  "Guinea-Bissau":{flag:"🇬🇼",name:"Гвинея-Бисау",fact:"Архипелаг Бижагош — объект ЮНЕСКО."},
+  "Guyana":{flag:"🇬🇾",name:"Гайана",fact:"Единственная англоязычная страна Южной Америки."},
+  "Haiti":{flag:"🇭🇹",name:"Гаити",fact:"Первая независимая чернокожая республика (1804)."},
+  "Honduras":{flag:"🇭🇳",name:"Гондурас",fact:"Руины Копана — важный город цивилизации майя."},
+  "Hungary":{flag:"🇭🇺",name:"Венгрия",fact:"Будапешт славится термальными купальнями (более 120)."},
+  "Iceland":{flag:"🇮🇸",name:"Исландия",fact:"Страна гейзеров, вулканов и северного сияния."},
+  "India":{flag:"🇮🇳",name:"Индия",fact:"Самая населённая страна, родина йоги и Тадж-Махала."},
+  "Indonesia":{flag:"🇮🇩",name:"Индонезия",fact:"Крупнейший архипелаг мира: более 17 000 островов."},
+  "Iran":{flag:"🇮🇷",name:"Иран",fact:"Персидская империя — одна из величайших цивилизаций."},
+  "Iraq":{flag:"🇮🇶",name:"Ирак",fact:"Месопотамия — колыбель цивилизации и письменности."},
+  "Ireland":{flag:"🇮🇪",name:"Ирландия",fact:"«Изумрудный остров», родина Дня святого Патрика."},
+  "Israel":{flag:"🇮🇱",name:"Израиль",fact:"Мёртвое море — самая низкая точка суши на Земле."},
+  "Italy":{flag:"🇮🇹",name:"Италия",fact:"Наибольшее число объектов ЮНЕСКО — более 55."},
+  "Ivory Coast":{flag:"🇨🇮",name:"Кот-д'Ивуар",fact:"Крупнейший производитель какао в мире."},
+  "Jamaica":{flag:"🇯🇲",name:"Ямайка",fact:"Родина регги и Усэйна Болта."},
+  "Japan":{flag:"🇯🇵",name:"Япония",fact:"Более 6800 островов и 100 активных вулканов."},
+  "Jordan":{flag:"🇯🇴",name:"Иордания",fact:"Петра — древний город, высеченный в скалах."},
+  "Kazakhstan":{flag:"🇰🇿",name:"Казахстан",fact:"Крупнейшая страна без выхода к морю, родина яблок."},
+  "Kenya":{flag:"🇰🇪",name:"Кения",fact:"Родина сафари и великой миграции антилоп гну."},
+  "Kosovo":{flag:"🇽🇰",name:"Косово",fact:"Одно из самых молодых государств (2008 г.)."},
+  "Kuwait":{flag:"🇰🇼",name:"Кувейт",fact:"Одни из крупнейших запасов нефти в мире."},
+  "Kyrgyzstan":{flag:"🇰🇬",name:"Кыргызстан",fact:"Озеро Иссык-Куль — одно из крупнейших горных озёр."},
+  "Laos":{flag:"🇱🇦",name:"Лаос",fact:"Называют «Страной миллиона слонов»."},
+  "Latvia":{flag:"🇱🇻",name:"Латвия",fact:"Рига славится архитектурой ар-нуво."},
+  "Lebanon":{flag:"🇱🇧",name:"Ливан",fact:"Ливанский кедр — символ страны на флаге."},
+  "Lesotho":{flag:"🇱🇸",name:"Лесото",fact:"Единственная страна, полностью выше 1000 м."},
+  "Liberia":{flag:"🇱🇷",name:"Либерия",fact:"Старейшая республика Африки, основана освобождёнными рабами."},
+  "Libya":{flag:"🇱🇾",name:"Ливия",fact:"90% территории — пустыня Сахара."},
+  "Lithuania":{flag:"🇱🇹",name:"Литва",fact:"Последняя языческая страна Европы (крестилась в 1387 г.)."},
+  "Luxembourg":{flag:"🇱🇺",name:"Люксембург",fact:"Одна из самых маленьких и богатых стран мира."},
+  "Madagascar":{flag:"🇲🇬",name:"Мадагаскар",fact:"90% флоры и фауны не встречается больше нигде."},
+  "Malawi":{flag:"🇲🇼",name:"Малави",fact:"Озеро Малави содержит больше видов рыб, чем любое другое."},
+  "Malaysia":{flag:"🇲🇾",name:"Малайзия",fact:"Башни Петронас были самыми высокими зданиями мира."},
+  "Mali":{flag:"🇲🇱",name:"Мали",fact:"Тимбукту — легендарный центр знаний и торговли."},
+  "Mauritania":{flag:"🇲🇷",name:"Мавритания",fact:"Структура Ришат — загадочный «Глаз Сахары»."},
+  "Mexico":{flag:"🇲🇽",name:"Мексика",fact:"Родина шоколада, кукурузы, ацтеков и майя."},
+  "Moldova":{flag:"🇲🇩",name:"Молдова",fact:"Крупнейшие винные подвалы мира — Милештий Мичь."},
+  "Mongolia":{flag:"🇲🇳",name:"Монголия",fact:"Наименее густонаселённая страна, родина Чингисхана."},
+  "Montenegro":{flag:"🇲🇪",name:"Черногория",fact:"Которский залив — самый южный фьорд Европы."},
+  "Morocco":{flag:"🇲🇦",name:"Марокко",fact:"Старейший действующий университет мира (аль-Карауин, 859 г.)."},
+  "Mozambique":{flag:"🇲🇿",name:"Мозамбик",fact:"На флаге изображён автомат Калашникова — единственный такой."},
+  "Myanmar":{flag:"🇲🇲",name:"Мьянма",fact:"В Багане более 2000 древних буддийских храмов."},
+  "Namibia":{flag:"🇳🇦",name:"Намибия",fact:"Намиб — старейшая пустыня мира (около 55 млн лет)."},
+  "Nepal":{flag:"🇳🇵",name:"Непал",fact:"Единственный непрямоугольный флаг, родина Эвереста."},
+  "Netherlands":{flag:"🇳🇱",name:"Нидерланды",fact:"Треть территории ниже уровня моря."},
+  "New Zealand":{flag:"🇳🇿",name:"Новая Зеландия",fact:"Первой в мире дала женщинам право голоса (1893)."},
+  "Nicaragua":{flag:"🇳🇮",name:"Никарагуа",fact:"Озеро Никарагуа — единственное пресноводное с акулами."},
+  "Niger":{flag:"🇳🇪",name:"Нигер",fact:"Одна из самых жарких стран, большая часть — Сахара."},
+  "Nigeria":{flag:"🇳🇬",name:"Нигерия",fact:"Самая населённая страна Африки (более 220 млн)."},
+  "North Korea":{flag:"🇰🇵",name:"КНДР",fact:"Одна из самых закрытых стран мира."},
+  "Norway":{flag:"🇳🇴",name:"Норвегия",fact:"Родина викингов и красивейших фьордов."},
+  "Oman":{flag:"🇴🇲",name:"Оман",fact:"Одна из старейших цивилизаций Аравийского полуострова."},
+  "Pakistan":{flag:"🇵🇰",name:"Пакистан",fact:"К2 — вторая по высоте гора и самая сложная для восхождения."},
+  "Palestine":{flag:"🇵🇸",name:"Палестина",fact:"Вифлеем — место рождения Иисуса Христа по традиции."},
+  "Panama":{flag:"🇵🇦",name:"Панама",fact:"Панамский канал соединяет Атлантику и Тихий океан."},
+  "Papua New Guinea":{flag:"🇵🇬",name:"Папуа — Новая Гвинея",fact:"Говорят на более чем 800 языках."},
+  "Paraguay":{flag:"🇵🇾",name:"Парагвай",fact:"Одна из двух стран Южной Америки без выхода к морю."},
+  "Peru":{flag:"🇵🇪",name:"Перу",fact:"Мачу-Пикчу — древний город инков, новое чудо света."},
+  "Philippines":{flag:"🇵🇭",name:"Филиппины",fact:"Более 7600 островов."},
+  "Poland":{flag:"🇵🇱",name:"Польша",fact:"Краков — культурная столица с прекрасным средневековым центром."},
+  "Portugal":{flag:"🇵🇹",name:"Португалия",fact:"Старейшее государство Европы в неизменных границах (с 1139 г.)."},
+  "Qatar":{flag:"🇶🇦",name:"Катар",fact:"Одна из богатейших стран по ВВП на душу населения."},
+  "Romania":{flag:"🇷🇴",name:"Румыния",fact:"Трансильвания — родина легенды о графе Дракуле."},
+  "Russia":{flag:"🇷🇺",name:"Россия",fact:"Самая большая страна (17,1 млн км²), 11 часовых поясов."},
+  "Rwanda":{flag:"🇷🇼",name:"Руанда",fact:"«Страна тысячи холмов» и «Африканская Швейцария»."},
+  "Saudi Arabia":{flag:"🇸🇦",name:"Саудовская Аравия",fact:"Крупнейший экспортёр нефти, хранитель двух святынь."},
+  "S. Sudan":{flag:"🇸🇸",name:"Южный Судан",fact:"Самое молодое государство мира (2011 г.)."},
+  "Senegal":{flag:"🇸🇳",name:"Сенегал",fact:"Дакар — конечная точка легендарного ралли «Дакар»."},
+  "Serbia":{flag:"🇷🇸",name:"Сербия",fact:"Никола Тесла родился на территории современной Сербии."},
+  "Sierra Leone":{flag:"🇸🇱",name:"Сьерра-Леоне",fact:"Название переводится как «Львиные горы»."},
+  "Slovakia":{flag:"🇸🇰",name:"Словакия",fact:"Более 6000 пещер, многие — объекты ЮНЕСКО."},
+  "Slovenia":{flag:"🇸🇮",name:"Словения",fact:"60% покрыто лесом — одна из самых зелёных стран Европы."},
+  "Solomon Is.":{flag:"🇸🇧",name:"Соломоновы Острова",fact:"Нетронутые коралловые рифы."},
+  "Somalia":{flag:"🇸🇴",name:"Сомали",fact:"Самая длинная береговая линия в Африке."},
+  "South Africa":{flag:"🇿🇦",name:"ЮАР",fact:"Три столицы и 11 официальных языков."},
+  "South Korea":{flag:"🇰🇷",name:"Южная Корея",fact:"Мировой лидер технологий, родина Samsung и K-pop."},
+  "Spain":{flag:"🇪🇸",name:"Испания",fact:"Вторая по посещаемости страна, родина фламенко."},
+  "Sri Lanka":{flag:"🇱🇰",name:"Шри-Ланка",fact:"Крупнейший экспортёр чая «Цейлон»."},
+  "Sudan":{flag:"🇸🇩",name:"Судан",fact:"Больше пирамид, чем в Египте — более 200."},
+  "Suriname":{flag:"🇸🇷",name:"Суринам",fact:"93% покрыто тропическим лесом."},
+  "Sweden":{flag:"🇸🇪",name:"Швеция",fact:"Родина IKEA, Spotify и Нобелевской премии."},
+  "Switzerland":{flag:"🇨🇭",name:"Швейцария",fact:"Нейтральная страна с 4 языками и лучшим шоколадом."},
+  "Syria":{flag:"🇸🇾",name:"Сирия",fact:"Дамаск — один из древнейших непрерывно населённых городов."},
+  "Taiwan":{flag:"🇹🇼",name:"Тайвань",fact:"Мировой лидер в полупроводниках (TSMC)."},
+  "Tajikistan":{flag:"🇹🇯",name:"Таджикистан",fact:"93% территории — горы, включая Памир."},
+  "Tanzania":{flag:"🇹🇿",name:"Танзания",fact:"Килиманджаро — высочайшая вершина Африки (5895 м)."},
+  "Thailand":{flag:"🇹🇭",name:"Таиланд",fact:"Единственная страна ЮВА, никогда не бывшая колонией."},
+  "Timor-Leste":{flag:"🇹🇱",name:"Восточный Тимор",fact:"Одно из самых молодых государств Азии."},
+  "Togo":{flag:"🇹🇬",name:"Того",fact:"Одна из самых маленьких стран Африки."},
+  "Trinidad and Tobago":{flag:"🇹🇹",name:"Тринидад и Тобаго",fact:"Родина стилпэн и знаменитого карнавала."},
+  "Tunisia":{flag:"🇹🇳",name:"Тунис",fact:"Карфаген — древний город, соперник Рима."},
+  "Turkey":{flag:"🇹🇷",name:"Турция",fact:"Стамбул — единственный город на двух континентах."},
+  "Turkmenistan":{flag:"🇹🇲",name:"Туркменистан",fact:"«Врата ада» — горящий газовый кратер с 1971 года."},
+  "Uganda":{flag:"🇺🇬",name:"Уганда",fact:"Дом горных горилл и исток Нила."},
+  "Ukraine":{flag:"🇺🇦",name:"Украина",fact:"Крупнейшая страна, полностью расположенная в Европе."},
+  "United Arab Emirates":{flag:"🇦🇪",name:"ОАЭ",fact:"Бурдж-Халифа — самое высокое здание (828 м)."},
+  "United Kingdom":{flag:"🇬🇧",name:"Великобритания",fact:"Лондон — финансовый и культурный центр мира."},
+  "United States of America":{flag:"🇺🇸",name:"США",fact:"Третья по площади и населению, родина Голливуда и NASA."},
+  "Uruguay":{flag:"🇺🇾",name:"Уругвай",fact:"Первый победитель чемпионата мира по футболу (1930)."},
+  "Uzbekistan":{flag:"🇺🇿",name:"Узбекистан",fact:"Самарканд — древний город на Великом шёлковом пути."},
+  "Vanuatu":{flag:"🇻🇺",name:"Вануату",fact:"Одно из самых счастливых мест по индексу HPI."},
+  "Venezuela":{flag:"🇻🇪",name:"Венесуэла",fact:"Водопад Анхель — самый высокий в мире (979 м)."},
+  "Vietnam":{flag:"🇻🇳",name:"Вьетнам",fact:"Второй по величине экспортёр кофе в мире."},
+  "W. Sahara":{flag:"🇪🇭",name:"Западная Сахара",fact:"Спорная территория с богатыми запасами фосфатов."},
+  "Yemen":{flag:"🇾🇪",name:"Йемен",fact:"Старый город Сана — объект ЮНЕСКО с уникальной архитектурой."},
+  "Zambia":{flag:"🇿🇲",name:"Замбия",fact:"Водопад Виктория — один из крупнейших в мире."},
+  "Zimbabwe":{flag:"🇿🇼",name:"Зимбабве",fact:"Руины Великого Зимбабве — крупнейшее каменное сооружение Африки."},
+  "N. Macedonia":{flag:"🇲🇰",name:"Северная Македония",fact:"Охридское озеро — одно из древнейших озёр Европы."},
+  "Macedonia":{flag:"🇲🇰",name:"Северная Македония",fact:"Охридское озеро — одно из древнейших озёр Европы."},
+  "Puerto Rico":{flag:"🇵🇷",name:"Пуэрто-Рико",fact:"Территория США с уникальной карибской культурой."},
+  "New Caledonia":{flag:"🇳🇨",name:"Новая Каледония",fact:"Лагуна Новой Каледонии — крупнейшая в мире."},
+  "Somaliland":{flag:"🇸🇴",name:"Сомалиленд",fact:"Самопровозглашённое государство с собственной валютой."},
+  "Antarctica":{flag:"🏳️",name:"Антарктида",fact:"Самый холодный, сухой и ветреный континент."},
+  "Falkland Is.":{flag:"🇫🇰",name:"Фолклендские о-ва",fact:"Полмиллиона пингвинов."},
+};
+
+const aliases={
+  "Côte d'Ivoire":"Ivory Coast","Czech Republic":"Czechia",
+  "Republic of the Congo":"Congo","Democratic Republic of the Congo":"Dem. Rep. Congo",
+  "South Sudan":"S. Sudan","Dominican Republic":"Dominican Rep.",
+  "Equatorial Guinea":"Eq. Guinea","Western Sahara":"W. Sahara",
+  "Solomon Islands":"Solomon Is.","Falkland Islands":"Falkland Is.",
+  "North Macedonia":"N. Macedonia","Swaziland":"eSwatini",
+  "East Timor":"Timor-Leste","Burma":"Myanmar","The Bahamas":"Bahamas",
+  "United Republic of Tanzania":"Tanzania","Republic of Serbia":"Serbia",
+  "Central African Rep.":"Central African Republic",
+};
+
+function getInfo(name){
+  if(factsDB[name])return factsDB[name];
+  if(aliases[name]&&factsDB[aliases[name]])return factsDB[aliases[name]];
+  for(const k in factsDB){if(name.includes(k)||k.includes(name))return factsDB[k];}
+  return null;
+}
+
+const canvas=document.getElementById("globeCanvas"),ctx=canvas.getContext("2d",{alpha:false});
+let width,height,features=[],currentHover=null;
+let rotation=[0,-18,0],isInteracting=false,autoRotate=true,lastInteraction=Date.now();
+let velocity=[0,0],inertiaTimer=null;
+
+let currentScale=1;
+let targetScale=1;
+const ZOOM_MIN=0.6;
+const ZOOM_MAX=3.2;
+const ZOOM_SPEED=0.0018;
+const ZOOM_LERP=0.10;
+
+const projection=d3.geoOrthographic().clipAngle(90).precision(.15);
+const pathGen=d3.geoPath(projection,ctx);
+
+function resize(){
+  const s=canvas.parentElement.clientWidth;
+  width=s;height=s;canvas.width=width;canvas.height=height;
+  projection.translate([width/2,height/2]).scale(width/2.1*currentScale);
+}
+window.addEventListener('resize',resize);resize();
+
+function flyTo(coords){
+  autoRotate=false;
+  const interp=d3.interpolate(projection.rotate(),[-coords[0],-coords[1]]);
+  d3.transition().duration(1200).ease(d3.easeCubicOut)
+    .tween("rotate",()=>t=>{rotation=interp(t);lastInteraction=Date.now()})
+    .on("end",()=>{autoRotate=true;});
+}
+
+function applyInertia(){
+  if(Math.abs(velocity[0])<0.02&&Math.abs(velocity[1])<0.02){velocity=[0,0];return}
+  rotation[0]+=velocity[0];rotation[1]-=velocity[1];
+  velocity[0]*=0.93;velocity[1]*=0.93;
+  lastInteraction=Date.now();
+  inertiaTimer=requestAnimationFrame(()=>{applyInertia();});
+}
+
+d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-110m.json").then(data=>{
+  features=topojson.feature(data,data.objects.countries).features;
+});
+
+const drag=d3.drag()
+  .on("start",()=>{
+    isInteracting=true;autoRotate=false;
+    if(inertiaTimer){cancelAnimationFrame(inertiaTimer);inertiaTimer=null;}
+    velocity=[0,0];canvas.style.cursor='grabbing';
+  })
+  .on("drag",event=>{
+    const k=75/(projection.scale());
+    if(event.dx!==undefined&&event.dy!==undefined){
+      rotation[0]+=event.dx*k;rotation[1]-=event.dy*k;
+      velocity=[event.dx*k*0.45,event.dy*k*0.45];
+    }
+    lastInteraction=Date.now();
+  })
+  .on("end",()=>{
+    isInteracting=false;canvas.style.cursor='grab';
+    if(Math.abs(velocity[0])>0.1||Math.abs(velocity[1])>0.1)applyInertia();
+    else autoRotate=true;
+  });
+d3.select(canvas).call(drag);
+
+canvas.addEventListener("wheel",e=>{
+  e.preventDefault();
+  targetScale-=e.deltaY*ZOOM_SPEED;
+  targetScale=Math.min(Math.max(targetScale,ZOOM_MIN),ZOOM_MAX);
+  lastInteraction=Date.now();
+},{passive:false});
+
+canvas.addEventListener("mousemove",e=>{
+  const rect=canvas.getBoundingClientRect();
+  const x=(e.clientX-rect.left)*(canvas.width/rect.width);
+  const y=(e.clientY-rect.top)*(canvas.height/rect.height);
+  const p=projection.invert([x,y]);
+  currentHover=(p&&Math.abs(p[0])<=180)?features.find(f=>d3.geoContains(f,p)):null;
+  const tooltip=document.getElementById("tooltipDiv");
+  if(currentHover){
+    const nm=currentHover.properties.name;
+    const inf=getInfo(nm);
+    const f=inf?inf.flag:"📍";
+    tooltip.style.display="flex";
+    tooltip.style.left=e.clientX+18+"px";
+    tooltip.style.top=e.clientY-18+"px";
+    tooltip.innerHTML=`${flagImg(f,22)}<span>${inf?inf.name:nm}</span>`;
+  }else{
+    tooltip.style.display="none";
+  }
+});
+
+canvas.addEventListener("click",()=>{
+  if(currentHover){
+    const nm=currentHover.properties.name;
+    const inf=getInfo(nm)||{flag:"📍",name:nm,fact:"Информации пока нет, но страна заслуживает внимания!"};
+    const flagEl=document.getElementById("flagEmoji");
+    flagEl.innerHTML=flagImg(inf.flag,80);
+    flagEl.classList.remove("bounce");
+    void flagEl.offsetWidth;
+    flagEl.classList.add("bounce");
+    document.getElementById("countryName").innerText=inf.name;
+    document.getElementById("factText").innerText=inf.fact;
+    document.getElementById("metaText").innerText=nm;
+    const center=d3.geoCentroid(currentHover);
+    flyTo(center);
+  }
+});
+
+document.getElementById("searchInput").addEventListener("input",e=>{
+  const q=e.target.value.toLowerCase().trim();if(!q)return;
+  let country=null;
+  for(const [eng,data] of Object.entries(factsDB)){
+    if(data.name.toLowerCase().includes(q)||eng.toLowerCase().includes(q)){
+      country=features.find(f=>{
+        const n=f.properties.name;
+        return n===eng||n.toLowerCase().includes(eng.toLowerCase())||(aliases[n]&&aliases[n]===eng);
+      });
+      if(country)break;
+    }
+  }
+  if(!country)country=features.find(f=>f.properties.name.toLowerCase().includes(q));
+  if(country){
+    const center=d3.geoCentroid(country);
+    flyTo(center);currentHover=country;
+    canvas.dispatchEvent(new Event('click'));
+  }
+});
+
+d3.timer(()=>{
+  const diff=targetScale-currentScale;
+  if(Math.abs(diff)>0.0001){
+    currentScale+=diff*ZOOM_LERP;
+  }else{
+    currentScale=targetScale;
+  }
+  projection.scale(width/2.1*currentScale);
+
+  if(autoRotate&&!isInteracting&&Date.now()-lastInteraction>2800){
+    rotation[0]+=0.18;
+  }
+
+  ctx.fillStyle=getComputedStyle(document.body).getPropertyValue('--bg-color');
+  ctx.fillRect(0,0,width,height);
+  ctx.save();
+  ctx.beginPath();ctx.arc(width/2,height/2,projection.scale(),0,2*Math.PI);ctx.clip();
+  ctx.fillStyle=getComputedStyle(document.body).getPropertyValue('--sea-color');
+  ctx.fill();
+  projection.rotate(rotation);
+  
+  const landColor=getComputedStyle(document.body).getPropertyValue('--land-color');
+  const hoverColor=getComputedStyle(document.body).getPropertyValue('--hover-color');
+  const borderColor=getComputedStyle(document.body).getPropertyValue('--border-color');
+
+  features.forEach(d=>{
+    ctx.beginPath();pathGen(d);
+    
+    // ✅ Гренландия теперь зелёная как все страны (убрано специальное правило)
+    let fillColor = landColor;
+
+    if(d===currentHover){
+      ctx.fillStyle=hoverColor;ctx.fill();
+      ctx.strokeStyle=borderColor;ctx.lineWidth=2.4;ctx.stroke();
+      ctx.strokeStyle='#ffffff';ctx.lineWidth=1;ctx.stroke();
+    }else{
+      ctx.fillStyle=fillColor;ctx.fill();
+      ctx.strokeStyle=borderColor;ctx.lineWidth=1.6;ctx.stroke();
+    }
+  });
+  ctx.restore();
+});
+})();
+</script>
+</body>
+</html>
